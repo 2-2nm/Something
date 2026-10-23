@@ -1,0 +1,253 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Mochi Munch</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;700&display=swap" rel="stylesheet">
+<style>
+:root{--ink:#3b2a4d;--pink:#ff8fb1;--sky:#e9e4ff;--mint:#7fd8b5}
+*{box-sizing:border-box}
+html,body{height:100%;margin:0}
+body{display:flex;align-items:center;justify-content:center;background:var(--sky);font-family:Fredoka,"Trebuchet MS",sans-serif;color:var(--ink);overflow:hidden}
+.stage{position:relative;width:min(100vw,66.66vh);aspect-ratio:2/3}
+canvas{width:100%;height:100%;display:block;touch-action:none}
+.overlay{position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:center;gap:14px;text-align:center;padding:24px;background:rgba(233,228,255,.85)}
+.overlay.hidden{display:none}
+h1{font-size:46px;margin:0;line-height:1}
+p{margin:0;font-size:18px;max-width:26ch}
+button{font:inherit;font-weight:700;font-size:22px;padding:12px 34px;border:0;border-radius:999px;background:var(--pink);color:#fff;cursor:pointer;box-shadow:0 5px 0 #d9658c}
+button:active{transform:translateY(4px);box-shadow:0 1px 0 #d9658c}
+button:focus-visible{outline:3px solid var(--ink);outline-offset:3px}
+</style>
+</head>
+<body>
+<div class="stage">
+<canvas id="game" aria-label="Mochi Munch game"></canvas>
+<div class="overlay" id="overlay">
+<h1 id="title">Mochi Munch</h1>
+<p id="note">Catch the treats. Dodge the socks and chilies.</p>
+<p>Drag, tap, or use the arrow keys.</p>
+<button id="start">Play</button>
+</div>
+</div>
+<script>
+const canvas=document.getElementById("game");
+const ctx=canvas.getContext("2d");
+const overlay=document.getElementById("overlay");
+const title=document.getElementById("title");
+const note=document.getElementById("note");
+const startBtn=document.getElementById("start");
+const W=360,H=540;
+canvas.width=W;
+canvas.height=H;
+const INK="#3b2a4d";
+const GOOD=["🍓","🍡","🍩","🍙","🧁"];
+const BAD=["🧦","🌶️"];
+const EMOJI_FONT='"Apple Color Emoji","Segoe UI Emoji","Noto Color Emoji",sans-serif';
+let best=0;
+try{best=Number(localStorage.getItem("mochi-best"))||0}catch(e){}
+const mochi={x:W/2,target:W/2,y:H-70,r:38,squish:0,blink:0};
+let items=[],bits=[],clouds=[],score=0,lives=3,state="idle",spawn=0,elapsed=0,last=0,dir=0;
+for(let i=0;i<4;i++)clouds.push({x:Math.random()*W,y:50+i*110,s:.6+Math.random()*.8,v:6+Math.random()*8});
+
+function reset(){
+items=[];bits=[];score=0;lives=3;spawn=0;elapsed=0;
+mochi.x=mochi.target=W/2;mochi.squish=0;
+}
+function start(){
+reset();
+state="play";
+overlay.classList.add("hidden");
+}
+function finish(){
+state="over";
+if(score>best){
+best=score;
+try{localStorage.setItem("mochi-best",String(best))}catch(e){}
+}
+title.textContent=score>=30?"So full!":"Yum!";
+note.textContent="You ate "+score+" treats. Best: "+best+".";
+startBtn.textContent="Play again";
+overlay.classList.remove("hidden");
+startBtn.focus();
+}
+function burst(x,y,text){
+for(let i=0;i<5;i++)bits.push({x,y,vx:(Math.random()-.5)*160,vy:-60-Math.random()*90,life:.7,text});
+}
+function spawnItem(){
+const bad=Math.random()<Math.min(.35,.15+elapsed*.004);
+const list=bad?BAD:GOOD;
+items.push({
+x:24+Math.random()*(W-48),
+y:-24,
+vy:Math.min(330,110+elapsed*3+Math.random()*40),
+bad,
+emoji:list[Math.floor(Math.random()*list.length)],
+rot:0,
+vr:(Math.random()-.5)*3
+});
+}
+function update(dt){
+clouds.forEach(c=>{c.x+=c.v*dt;if(c.x>W+70)c.x=-70});
+mochi.squish-=mochi.squish*Math.min(1,dt*8);
+mochi.blink-=dt;
+if(mochi.blink<-2.5)mochi.blink=.15;
+bits.forEach(b=>{b.x+=b.vx*dt;b.y+=b.vy*dt;b.vy+=300*dt;b.life-=dt});
+bits=bits.filter(b=>b.life>0);
+if(state!=="play")return;
+elapsed+=dt;
+mochi.target=Math.max(mochi.r,Math.min(W-mochi.r,mochi.target+dir*380*dt));
+mochi.x+=(mochi.target-mochi.x)*Math.min(1,dt*14);
+spawn-=dt;
+if(spawn<=0){
+spawn=Math.max(.35,.9-elapsed*.012);
+spawnItem();
+}
+items=items.filter(it=>{
+it.y+=it.vy*dt;
+it.rot+=it.vr*dt;
+const dy=it.y-mochi.y;
+if(Math.abs(it.x-mochi.x)<mochi.r+6&&dy>-mochi.r&&dy<10){
+if(it.bad){
+lives--;
+mochi.squish=-1;
+burst(it.x,it.y,"💔");
+}else{
+score++;
+mochi.squish=1;
+burst(it.x,it.y,"✨");
+}
+return false;
+}
+return it.y<H+30;
+});
+if(lives<=0)finish();
+}
+function cloud(c){
+ctx.fillStyle="rgba(255,255,255,.7)";
+ctx.beginPath();
+ctx.ellipse(c.x,c.y,36*c.s,16*c.s,0,0,Math.PI*2);
+ctx.ellipse(c.x-20*c.s,c.y+4*c.s,22*c.s,12*c.s,0,0,Math.PI*2);
+ctx.ellipse(c.x+22*c.s,c.y+5*c.s,24*c.s,12*c.s,0,0,Math.PI*2);
+ctx.fill();
+}
+function drawMochi(){
+const r=mochi.r;
+ctx.fillStyle="rgba(59,42,77,.15)";
+ctx.beginPath();
+ctx.ellipse(mochi.x,mochi.y+r*.95,r*.9,7,0,0,Math.PI*2);
+ctx.fill();
+ctx.save();
+ctx.translate(mochi.x,mochi.y+r*.9);
+ctx.scale(1+mochi.squish*.25,1-mochi.squish*.25);
+ctx.translate(0,-r*.9);
+ctx.fillStyle="#fff";
+ctx.strokeStyle=INK;
+ctx.lineWidth=3;
+ctx.beginPath();
+ctx.ellipse(0,0,r*1.05,r*.9,0,0,Math.PI*2);
+ctx.fill();
+ctx.stroke();
+ctx.fillStyle="rgba(255,143,177,.6)";
+ctx.beginPath();
+ctx.ellipse(-24,7,7,4.5,0,0,Math.PI*2);
+ctx.ellipse(24,7,7,4.5,0,0,Math.PI*2);
+ctx.fill();
+ctx.fillStyle=INK;
+ctx.strokeStyle=INK;
+ctx.lineWidth=3;
+ctx.lineCap="round";
+if(mochi.blink>0||mochi.squish<-.3){
+ctx.beginPath();
+ctx.moveTo(-17,-5);ctx.lineTo(-8,-5);
+ctx.moveTo(8,-5);ctx.lineTo(17,-5);
+ctx.stroke();
+}else{
+ctx.beginPath();
+ctx.arc(-12,-6,4.5,0,Math.PI*2);
+ctx.arc(12,-6,4.5,0,Math.PI*2);
+ctx.fill();
+}
+ctx.beginPath();
+if(mochi.squish>.3){
+ctx.ellipse(0,8,7,8*Math.min(1,mochi.squish),0,0,Math.PI*2);
+ctx.fillStyle="#ff6f9c";
+ctx.fill();
+}else if(mochi.squish<-.3){
+ctx.arc(0,16,7,Math.PI*1.1,Math.PI*1.9);
+ctx.stroke();
+}else{
+ctx.arc(0,3,7,Math.PI*.15,Math.PI*.85);
+ctx.stroke();
+}
+ctx.restore();
+}
+function draw(){
+const g=ctx.createLinearGradient(0,0,0,H);
+g.addColorStop(0,"#e9e4ff");
+g.addColorStop(1,"#ffd9e6");
+ctx.fillStyle=g;
+ctx.fillRect(0,0,W,H);
+clouds.forEach(cloud);
+ctx.fillStyle="#7fd8b5";
+ctx.beginPath();
+ctx.ellipse(W/2,H+32,W*.8,78,0,0,Math.PI*2);
+ctx.fill();
+ctx.textAlign="center";
+ctx.textBaseline="middle";
+items.forEach(it=>{
+ctx.save();
+ctx.translate(it.x,it.y);
+ctx.rotate(it.rot);
+ctx.font="34px "+EMOJI_FONT;
+ctx.fillText(it.emoji,0,0);
+ctx.restore();
+});
+drawMochi();
+bits.forEach(b=>{
+ctx.globalAlpha=Math.max(0,b.life/.7);
+ctx.font="18px "+EMOJI_FONT;
+ctx.fillText(b.text,b.x,b.y);
+});
+ctx.globalAlpha=1;
+ctx.fillStyle=INK;
+ctx.textAlign="left";
+ctx.font='700 26px Fredoka,"Trebuchet MS",sans-serif';
+ctx.fillText("Treats "+score,16,28);
+ctx.font='500 15px Fredoka,"Trebuchet MS",sans-serif';
+ctx.fillText("Best "+best,16,52);
+ctx.textAlign="right";
+ctx.font="22px "+EMOJI_FONT;
+let hearts="";
+for(let i=0;i<3;i++)hearts+=i<lives?"❤️":"🤍";
+ctx.fillText(hearts,W-14,28);
+}
+function frame(t){
+const dt=Math.min(.033,(t-last)/1000||0);
+last=t;
+update(dt);
+draw();
+requestAnimationFrame(frame);
+}
+function aim(e){
+const r=canvas.getBoundingClientRect();
+mochi.target=(e.clientX-r.left)/r.width*W;
+}
+canvas.addEventListener("pointermove",aim);
+canvas.addEventListener("pointerdown",aim);
+window.addEventListener("keydown",e=>{
+if(e.key==="ArrowLeft"||e.key==="a")dir=-1;
+if(e.key==="ArrowRight"||e.key==="d")dir=1;
+});
+window.addEventListener("keyup",e=>{
+if(["ArrowLeft","a"].includes(e.key)&&dir===-1)dir=0;
+if(["ArrowRight","d"].includes(e.key)&&dir===1)dir=0;
+});
+startBtn.addEventListener("click",start);
+requestAnimationFrame(frame);
+</script>
+</body>
+</html>
